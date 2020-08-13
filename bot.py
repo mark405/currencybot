@@ -1,20 +1,27 @@
 import telebot
 import schedule
+import sqlite3
 from threading import Thread
 from time import sleep
 from telebot import types
 import config
 from mainmain import convert_dollar, convert_euro, convert_pound, \
-convert_bitcoin, convert_rubl, convert_frank, convert_canadadollar,\
-convert_yen, convert_ausdollar, convert_ether, convert_israel, convert_litecoin, \
-convert_bitcoin_dollar, convert_ether_dollar, convert_litecoin_dollar
+    convert_bitcoin, convert_rubl, convert_frank, convert_canadadollar, \
+    convert_yen, convert_ausdollar, convert_ether, convert_israel, convert_litecoin, \
+    convert_bitcoin_dollar, convert_ether_dollar, convert_litecoin_dollar
 from mainrus import convert_rus_dollar, convert_rus_euro, convert_rus_pound, \
-convert_rus_bitcoin, convert_rus_grivna, convert_rus_frank, convert_rus_canadadollar, \
-convert_rus_yen, convert_rus_ausdollar, convert_rus_ether, convert_rus_israel, convert_rus_litecoin, \
-convert_litecoin_euro, convert_ether_euro, convert_bitcoin_euro
-
+    convert_rus_bitcoin, convert_rus_grivna, convert_rus_frank, convert_rus_canadadollar, \
+    convert_rus_yen, convert_rus_ausdollar, convert_rus_ether, convert_rus_israel, convert_rus_litecoin, \
+    convert_litecoin_euro, convert_ether_euro, convert_bitcoin_euro
 
 bot = telebot.TeleBot(config.TOKEN)
+
+con = sqlite3.connect("id2.db", check_same_thread=False)
+
+cursor = con.cursor()
+
+cursor.execute("""CREATE TABLE IF NOT EXISTS USER_TABLE(user_id INT)""")
+con.commit()
 
 
 @bot.message_handler(commands=['start', 'go'])
@@ -62,6 +69,49 @@ def answer(call):
     except Exception as e:
         print(e)
         bot.send_message(call.message.chat.id, 'Неполадки с кодом :/')
+
+
+@bot.message_handler(commands=['notifications'])
+def add(message):
+    global id
+    id = message.from_user.id
+    cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
+    if cursor.fetchone() is None:
+        try:
+            cursor.execute(f"""INSERT INTO USER_TABLE VALUES(?)""", (id,))
+            con.commit()
+            msg = bot.send_message(message.chat.id, 'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
+            schedule.every(10).seconds.do(lambda: job(message))
+            #bot.register_next_step_handler(msg, grivna_rubl)
+        except Exception as e:
+            print(e)
+            bot.send_message(message.chat.id, 'Не удалось подключить уведомления')
+    else:
+        try:
+            cursor.execute(f"""DELETE FROM USER_TABLE WHERE user_id = {id}""")
+            con.commit()
+            msg = bot.send_message(message.chat.id, 'Уведомления успешно отключены')
+            schedule.cancel_job(lambda: job(message))
+            #bot.register_next_step_handler(msg, grivna_rubl)
+        except Exception as e:
+            print(e)
+            bot.send_message(message.chat.id, 'Не удалось отключить уведомления')
+
+    while True:
+        schedule.run_pending()
+        sleep(1)
+
+
+def job(message):
+    # sqlite.cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
+    # if sqlite.cursor.fetchone() is None:
+    # return None
+    # else:
+    bot.send_message(message.from_user.id, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам'
+                                           f'\n<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
+                     parse_mode='html')
+
+#Thread(target=add, args=().start()
 
 
 @bot.message_handler(content_types=["text"])
@@ -161,10 +211,10 @@ def kurs(message):
             msg = bot.send_message(message.chat.id, f'<b>1</b> шекель = <b>{str(convert_israel[0].text)}</b> гривнам',
                                    parse_mode='html')
             bot.register_next_step_handler(msg, kurs)
-        #elif message.text == 'Курс злотого':
-           # msg = bot.send_message(message.chat.id, f'<b>1</b> шекель = <b>{str(convert_zlotiy[0].text)}</b> гривнам',
-                                   #parse_mode='html')
-            #bot.register_next_step_handler(msg, kurs)
+        # elif message.text == 'Курс злотого':
+        # msg = bot.send_message(message.chat.id, f'<b>1</b> шекель = <b>{str(convert_zlotiy[0].text)}</b> гривнам',
+        # parse_mode='html')
+        # bot.register_next_step_handler(msg, kurs)
         elif message.text == 'Криптовалюта...':
             global mark_up
             mark_up = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -544,20 +594,16 @@ def dollar_rus_litecoin(message):
         bot.send_message(message.chat.id, 'Неполадки с кодом :/')
 
 
-def schedule_checker():
+'''def schedule_checker(message):
+    cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
+    if cursor.fetchone() is None:
+        schedule.cancel_job(lambda: job(message))
+    else:
+        schedule.every(10).seconds.do(lambda: job(message))
     while True:
         schedule.run_pending()
-        sleep(1)
-
-def function_to_run():
-    return bot.send_message(346457069, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам',
-                                        f'\n<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
-                                        parse_mode='html')
+        sleep(1)'''
 
 if __name__ == '__main__':
-    schedule.every().days.at("14:15").do(function_to_run)
-
-    Thread(target=schedule_checker).start()
 
     bot.polling(none_stop=True, interval=0)
-
