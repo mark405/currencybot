@@ -4,6 +4,7 @@ import sqlite3
 from threading import Thread
 from time import sleep
 from telebot import types
+from telebot.util import async_dec
 import config
 from mainmain import convert_dollar, convert_euro, convert_pound, \
     convert_bitcoin, convert_rubl, convert_frank, convert_canadadollar, \
@@ -25,6 +26,7 @@ con.commit()
 
 
 @bot.message_handler(commands=['start', 'go'])
+@async_dec()
 def ask(message):
     try:
         global markup_inline
@@ -72,46 +74,54 @@ def answer(call):
 
 
 @bot.message_handler(commands=['notifications'])
+@async_dec()
 def add(message):
     global id
+    global status
     id = message.from_user.id
     cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
     if cursor.fetchone() is None:
         try:
             cursor.execute(f"""INSERT INTO USER_TABLE VALUES(?)""", (id,))
             con.commit()
-            msg = bot.send_message(message.chat.id, 'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
-            schedule.every(10).seconds.do(lambda: job(message))
-            #bot.register_next_step_handler(msg, grivna_rubl)
+            msg = bot.send_message(id,
+                                   'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
+            schedule.every(10).seconds.do(job)
+            status = 1
+            # bot.register_next_step_handler(msg, job)
         except Exception as e:
             print(e)
-            bot.send_message(message.chat.id, 'Не удалось подключить уведомления')
+            bot.send_message(id, 'Не удалось подключить уведомления')
     else:
         try:
             cursor.execute(f"""DELETE FROM USER_TABLE WHERE user_id = {id}""")
             con.commit()
-            msg = bot.send_message(message.chat.id, 'Уведомления успешно отключены')
-            schedule.cancel_job(lambda: job(message))
-            #bot.register_next_step_handler(msg, grivna_rubl)
+            msg = bot.send_message(id, 'Уведомления успешно отключены')
+            schedule.cancel_job(job)
+            status = 0
+            # bot.register_next_step_handler(msg, grivna_rubl)
         except Exception as e:
             print(e)
-            bot.send_message(message.chat.id, 'Не удалось отключить уведомления')
+            bot.send_message(id, 'Не удалось отключить уведомления')
 
-    while True:
+    while status == 1:
         schedule.run_pending()
         sleep(1)
 
 
-def job(message):
+def job():
     # sqlite.cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
     # if sqlite.cursor.fetchone() is None:
     # return None
     # else:
-    bot.send_message(message.from_user.id, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам'
+    bot.send_message(id, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам'
                                            f'\n<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
                      parse_mode='html')
 
-#Thread(target=add, args=().start()
+
+'''def remind(message):
+    msg = bot.send_message(message.chat.id, 'Вы отправили команду <u>/notifications</u>', parse_mode='html')
+    bot.register_next_step_handler(msg, add)'''
 
 
 @bot.message_handler(content_types=["text"])
@@ -605,5 +615,5 @@ def dollar_rus_litecoin(message):
         sleep(1)'''
 
 if __name__ == '__main__':
-
     bot.polling(none_stop=True, interval=0)
+
