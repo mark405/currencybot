@@ -1,609 +1,108 @@
 import telebot
-import schedule
-import sqlite3
 from threading import Thread
-from time import sleep
 from telebot import types
-import config
-from mainmain import convert_dollar, convert_euro, convert_pound, \
-    convert_bitcoin, convert_rubl, convert_frank, convert_canadadollar, \
-    convert_yen, convert_ausdollar, convert_ether, convert_israel, convert_litecoin, \
-    convert_bitcoin_dollar, convert_ether_dollar, convert_litecoin_dollar
-from mainrus import convert_rus_dollar, convert_rus_euro, convert_rus_pound, \
-    convert_rus_bitcoin, convert_rus_grivna, convert_rus_frank, convert_rus_canadadollar, \
-    convert_rus_yen, convert_rus_ausdollar, convert_rus_ether, convert_rus_israel, convert_rus_litecoin, \
-    convert_litecoin_euro, convert_ether_euro, convert_bitcoin_euro
-
-bot = telebot.TeleBot(config.TOKEN)
-
-con = sqlite3.connect("id2.db", check_same_thread=False)
-
-cursor = con.cursor()
-
-cursor.execute("""CREATE TABLE IF NOT EXISTS USER_TABLE(user_id INT)""")
-con.commit()
+from mainmain import *
+import logging
+import schedule
 
 
-@bot.message_handler(commands=['start', 'go'])
-def ask(message):
-    try:
-        global markup_inline
-        markup_inline = types.InlineKeyboardMarkup()
-        tab_yes = types.InlineKeyboardButton(text='Да', callback_data='yes')
-        tab_no = types.InlineKeyboardButton(text='Нет', callback_data='no')
+bot = telebot.TeleBot(TOKEN)
 
-        markup_inline.add(tab_yes, tab_no)
-        send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-        bot.send_message(message.chat.id, send_message, parse_mode='html')
-        bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        # bot.register_next_step_handler(msg, answer)
-    except Exception as e:
-        print(e)
-        msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-        bot.register_next_step_handler(msg, ask)
+logging.basicConfig(filename=LOG_FILE, filemode='a', level=logging.DEBUG,
+                    format='%(asctime)s,%(msecs)d %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logger = telebot.logging.getLogger(__name__)
 
 
-@bot.callback_query_handler(func=lambda call: True)
-def answer(call):
-    try:
-        if call.data == 'yes':
-            global gr_markup
-            gr_markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            grivna_button = types.KeyboardButton('Гривна')
-            rubl_button = types.KeyboardButton('Рубль')
-            gr_markup.add(grivna_button, rubl_button)
-            msg = bot.send_message(call.message.chat.id, f'В <b>гривнах</b> или <b>рублях</b>?', reply_markup=gr_markup,
-                                   parse_mode='html')
-            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id)
-            bot.register_next_step_handler(msg, grivna_rubl)
-        elif call.data == 'no':
-            bot.send_message(call.message.chat.id, f'<b>Прости, но это бот рассчитан только на курс валют😕</b>',
-                             parse_mode='html')
-            # bot.register_next_step_handler(msg, answer)
-        # elif call.message.text == '/start' or '/go':
-        # msg = bot.send_message(call.message.chat.id, f'<u>Ты вернулся в начало</u>', parse_mode='html')
-        # bot.register_next_step_handler(msg, ask)
-        else:
-            msg = bot.send_message(call.message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, answer)
-    except Exception as e:
-        print(e)
-        bot.send_message(call.message.chat.id, 'Неполадки с кодом :/')
-
-
-@bot.message_handler(commands=['notifications'])
-def add(message):
-    global id
-    id = message.from_user.id
-    cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
-    if cursor.fetchone() is None:
-        try:
-            cursor.execute(f"""INSERT INTO USER_TABLE VALUES(?)""", (id,))
-            con.commit()
-            msg = bot.send_message(message.chat.id, 'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
-            schedule.every(10).seconds.do(lambda: job(message))
-            #bot.register_next_step_handler(msg, grivna_rubl)
-        except Exception as e:
-            print(e)
-            bot.send_message(message.chat.id, 'Не удалось подключить уведомления')
-    else:
-        try:
-            cursor.execute(f"""DELETE FROM USER_TABLE WHERE user_id = {id}""")
-            con.commit()
-            msg = bot.send_message(message.chat.id, 'Уведомления успешно отключены')
-            schedule.cancel_job(lambda: job(message))
-            #bot.register_next_step_handler(msg, grivna_rubl)
-        except Exception as e:
-            print(e)
-            bot.send_message(message.chat.id, 'Не удалось отключить уведомления')
-
+def sheduler():
+    schedule.every().day.at("12:00").do(daily_notify)
+    # schedule.every(15).seconds.do(daily_notify)
     while True:
         schedule.run_pending()
         sleep(1)
 
 
-def job(message):
-    # sqlite.cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
-    # if sqlite.cursor.fetchone() is None:
-    # return None
-    # else:
-    bot.send_message(message.from_user.id, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам'
-                                           f'\n<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
-                     parse_mode='html')
-
-#Thread(target=add, args=().start()
-
-
-@bot.message_handler(content_types=["text"])
-def grivna_rubl(message):
-    try:
-        if message.text == 'Гривна':
-            global markup_reply
-            markup_reply = types.ReplyKeyboardMarkup()
-            dollar = types.KeyboardButton('Курс доллара США')
-            euro = types.KeyboardButton('Курс евро')
-            pound = types.KeyboardButton('Курс фунта')
-            rubl = types.KeyboardButton('Курс рубля')
-            frank = types.KeyboardButton('Курс швейцарского франка')
-            canadadollar = types.KeyboardButton('Курс канадского доллара')
-            ausdollar = types.KeyboardButton('Курс австралийского доллара')
-            yen = types.KeyboardButton('Курс японского йена')
-            israel = types.KeyboardButton('Курс шекеля')
-            zlotiy = types.KeyboardButton('Курс злотого')
-            bitok = types.KeyboardButton('Криптовалюта...', )
-            backtobutton = types.KeyboardButton('Назад')
-
-            markup_reply.add(dollar, euro, pound, rubl, frank, canadadollar, ausdollar, yen, israel, zlotiy, bitok,
-                             backtobutton)
-            msg = bot.send_message(message.chat.id, f'<u>Выбери валюту:</u>', parse_mode='html',
-                                   reply_markup=markup_reply)
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Рубль':
-            global rus_markup_reply
-            rus_markup_reply = types.ReplyKeyboardMarkup()
-            rus_dollar = types.KeyboardButton('Курс доллара США')
-            rus_euro = types.KeyboardButton('Курс евро')
-            rus_pound = types.KeyboardButton('Курс фунта')
-            grivna = types.KeyboardButton('Курс гривны')
-            rus_frank = types.KeyboardButton('Курс швейцарского франка')
-            rus_canadadollar = types.KeyboardButton('Курс канадского доллара')
-            rus_ausdollar = types.KeyboardButton('Курс австралийского доллара')
-            rus_yen = types.KeyboardButton('Курс японского йена')
-            rus_israel = types.KeyboardButton('Курс шекеля')
-            rus_bitok = types.KeyboardButton('Криптовалюта...', )
-            rus_backtobutton = types.KeyboardButton('Назад')
-
-            rus_markup_reply.add(rus_dollar, rus_euro, rus_pound, grivna, rus_frank, rus_canadadollar, rus_ausdollar,
-                                 rus_yen, rus_israel, rus_bitok, rus_backtobutton)
-            msg = bot.send_message(message.chat.id, f'<u>Выбери валюту:</u>', parse_mode='html',
-                                   reply_markup=rus_markup_reply)
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, grivna_rubl)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
+def daily_notify():
+    daily_query = 'SELECT user_id FROM users WHERE notify="YES";'
+    result_daily_query = post_sql_query(daily_query)
+    if result_daily_query:
+        users = list(map(lambda x: x[0], result_daily_query))
+        currency_msg = get_currency()
+        for user in users:
+            for msg in currency_msg:
+                bot.send_message(chat_id=user, text=msg)
 
 
-def kurs(message):
-    try:
-        if message.text == 'Курс доллара США':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс евро':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> евро = <b>{str(convert_euro[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс фунта':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> фунт = <b>{str(convert_pound[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс рубля':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> рубль = <b>{str(convert_rubl[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс швейцарского франка':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> франк = <b>{str(convert_frank[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс канадского доллара':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> канадский доллар = <b>{str(convert_canadadollar[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс австралийского доллара':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> автралийский доллар = <b>{str(convert_ausdollar[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс японского йена':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> йен = <b>{str(convert_yen[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Курс шекеля':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> шекель = <b>{str(convert_israel[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, kurs)
-        # elif message.text == 'Курс злотого':
-        # msg = bot.send_message(message.chat.id, f'<b>1</b> шекель = <b>{str(convert_zlotiy[0].text)}</b> гривнам',
-        # parse_mode='html')
-        # bot.register_next_step_handler(msg, kurs)
-        elif message.text == 'Криптовалюта...':
-            global mark_up
-            mark_up = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            bitcoin = types.KeyboardButton('Курс Bitcoin')
-            etherium = types.KeyboardButton('Курс Etherium')
-            litecoin = types.KeyboardButton('Курс Litecoin')
-            back_button = types.KeyboardButton('Назад')
-            mark_up.add(bitcoin, etherium, litecoin, back_button)
-
-            inline = types.InlineKeyboardMarkup()
-            url_button = types.InlineKeyboardButton(text='Узнать подробнее о криптовалютах...',
-                                                    url='https://alpari.com/ru/beginner/glossary/cryptocurrency/')
-            inline.add(url_button)
-
-            msg = bot.send_message(message.chat.id, f'<b>Курс одних из самых популярных криптомонет в мире</b> :)',
-                                   parse_mode='html', reply_markup=mark_up)
-            bot.register_next_step_handler(msg, new_kurs)
-            bot.send_message(message.chat.id, 'Хочешь узнать подробнее?🤔\nТогда жми сюда!', reply_markup=inline)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, 'В гривнах или рублях?', reply_markup=gr_markup)
-            bot.register_next_step_handler(msg, grivna_rubl)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, kurs)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
+def get_currency():
+    query_cur = f'SELECT USD, CAD, AUD, EUR, GBP, CHF, JPY, ILS, PLN, UAH, BITCOIN ' \
+                f'FROM currency_rub ORDER BY id DESC LIMIT 1;'
+    currency = post_sql_query(query_cur)
+    result_currency = list(zip(list(COUNTRY_CODE.keys()), currency[0]))
+    text_to_send = [f'{COUNTRY_CODE[i[0]]} = {i[1]} {MAIN_CURRENCY}' for i in result_currency]
+    return text_to_send
 
 
-def rus_kurs(message):
-    try:
-        if message.text == 'Курс доллара США':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс евро':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> евро = <b>{str(convert_rus_euro[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс фунта':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> фунт = <b>{str(convert_rus_pound[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс гривны':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> гривна = <b>{str(convert_rus_grivna[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс швейцарского франка':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> франк = <b>{str(convert_rus_frank[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс канадского доллара':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> канадский доллар = <b>{str(convert_rus_canadadollar[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс австралийского доллара':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> автралийский доллар = <b>{str(convert_rus_ausdollar[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс японского йена':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> йен = <b>{str(convert_rus_yen[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Курс шекеля':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> шекель = <b>{str(convert_rus_israel[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == 'Криптовалюта...':
-            global rus_mark_up
-            rus_mark_up = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            bitcoin = types.KeyboardButton('Курс Bitcoin')
-            etherium = types.KeyboardButton('Курс Etherium')
-            litecoin = types.KeyboardButton('Курс Litecoin')
-            back_button = types.KeyboardButton('Назад')
-            rus_mark_up.add(bitcoin, etherium, litecoin, back_button)
-
-            inline = types.InlineKeyboardMarkup()
-            url_button = types.InlineKeyboardButton(text='Узнать подробнее о криптовалютах...',
-                                                    url='https://alpari.com/ru/beginner/glossary/cryptocurrency/')
-            inline.add(url_button)
-
-            msg = bot.send_message(message.chat.id, f'<b>Курс одних из самых популярных криптомонет в мире</b> :)',
-                                   parse_mode='html', reply_markup=rus_mark_up)
-            bot.register_next_step_handler(msg, new_rus_kurs)
-            bot.send_message(message.chat.id, 'Хочешь узнать подробнее?🤔\nТогда жми сюда!', reply_markup=inline)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, 'В гривнах или рублях?', reply_markup=gr_markup)
-            bot.register_next_step_handler(msg, grivna_rubl)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, rus_kurs)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def new_kurs(message):
-    try:
-        reply_question = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        dollar_question = types.KeyboardButton('В долларах')
-        euro_question = types.KeyboardButton('В евро')
-        grivna_question = types.KeyboardButton('В гривнах')
-        back_but = types.KeyboardButton('Назад')
-        reply_question.add(dollar_question, euro_question, grivna_question, back_but)
-
-        if message.text == 'Курс Bitcoin':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=reply_question)
-            bot.register_next_step_handler(msg, dollar_grivna_bitcoin)
-        elif message.text == 'Курс Etherium':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=reply_question)
-            bot.register_next_step_handler(msg, dollar_grivna_ether)
-        elif message.text == 'Курс Litecoin':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=reply_question)
-            bot.register_next_step_handler(msg, dollar_grivna_litecoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Выбери валюту:</u>', parse_mode='html',
-                                   reply_markup=markup_reply)
-            bot.register_next_step_handler(msg, kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, new_kurs)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def new_rus_kurs(message):
-    try:
-        rus_reply_question = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        dollar_question = types.KeyboardButton('В долларах')
-        rus_question = types.KeyboardButton('В рублях')
-        euro_question = types.KeyboardButton('В евро')
-        back_but = types.KeyboardButton('Назад')
-        rus_reply_question.add(dollar_question, euro_question, rus_question, back_but)
-
-        if message.text == 'Курс Bitcoin':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=rus_reply_question)
-            bot.register_next_step_handler(msg, dollar_rus_bitcoin)
-        elif message.text == 'Курс Etherium':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=rus_reply_question)
-            bot.register_next_step_handler(msg, dollar_rus_ether)
-        elif message.text == 'Курс Litecoin':
-            msg = bot.send_message(message.chat.id, f'<b>В какой валюте?</b>', parse_mode='html',
-                                   reply_markup=rus_reply_question)
-            bot.register_next_step_handler(msg, dollar_rus_litecoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Выбери валюту:</u>', parse_mode='html',
-                                   reply_markup=rus_markup_reply)
-            bot.register_next_step_handler(msg, rus_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, new_rus_kurs)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_grivna_bitcoin(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Bitcoin = <b>{str(convert_bitcoin_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_bitcoin)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Bitcoin = <b>{str(convert_bitcoin_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_bitcoin)
-        elif message.text == 'В гривнах':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> Bitcoin = <b>{str(convert_bitcoin[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_bitcoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_grivna_bitcoin)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_rus_bitcoin(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Bitcoin = <b>{str(convert_bitcoin_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_bitcoin)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Bitcoin = <b>{str(convert_bitcoin_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_bitcoin)
-        elif message.text == 'В рублях':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Bitcoin = <b>{str(convert_rus_bitcoin[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_bitcoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=rus_mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_rus_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_rus_bitcoin)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_grivna_ether(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Etherium = <b>{str(convert_ether_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_ether)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Etherium = <b>{str(convert_ether_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_ether)
-        elif message.text == 'В гривнах':
-            msg = bot.send_message(message.chat.id, f'<b>1</b> Etherium = <b>{str(convert_ether[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_ether)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_grivna_ether)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_rus_ether(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Etherium = <b>{str(convert_ether_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_ether)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Etherium = <b>{str(convert_ether_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_ether)
-        elif message.text == 'В рублях':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Etherium = <b>{str(convert_rus_ether[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_ether)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=rus_mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_rus_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_rus_ether)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_grivna_litecoin(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_litecoin_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_litecoin)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_litecoin_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_litecoin)
-        elif message.text == 'В гривнах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_litecoin[0].text)}</b> гривнам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_grivna_litecoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_grivna_litecoin)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-def dollar_rus_litecoin(message):
-    try:
-        if message.text == 'В долларах':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_litecoin_dollar[0].text)}</b> долларам',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_litecoin)
-        elif message.text == 'В евро':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_litecoin_euro[0].text)}</b> евро',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_litecoin)
-        elif message.text == 'В рублях':
-            msg = bot.send_message(message.chat.id,
-                                   f'<b>1</b> Litecoin = <b>{str(convert_rus_litecoin[0].text)}</b> рублям',
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, dollar_rus_litecoin)
-        elif message.text == 'Назад':
-            msg = bot.send_message(message.chat.id, f'<u>Ты вернулся назад</u>', reply_markup=rus_mark_up,
-                                   parse_mode='html')
-            bot.register_next_step_handler(msg, new_rus_kurs)
-        elif message.text == '/start':
-            send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
-        else:
-            msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, dollar_rus_litecoin)
-    except Exception as e:
-        print(e)
-        bot.send_message(message.chat.id, 'Неполадки с кодом :/')
-
-
-'''def schedule_checker(message):
-    cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
-    if cursor.fetchone() is None:
-        schedule.cancel_job(lambda: job(message))
+@bot.message_handler(commands=['notify'])
+def add(message):
+    sql_check_id = f"SELECT * FROM users WHERE user_id = {message.from_user.id}"
+    result_check_id = post_sql_query(sql_check_id)
+    print(result_check_id)
+    if not result_check_id:
+        notify = 'YES'
+        sql_reg_user = f'INSERT OR IGNORE INTO users (user_id, username, reg_date, notify) ' \
+                       f'VALUES ({message.from_user.id},"{message.from_user.username}", ' \
+                       f'"{datetime.today().strftime("%Y.%m.%d %H:%M:%S")}", "{notify}");'
+        post_sql_query(sql_reg_user)
+        bot.send_message(message.from_user.id, 'Автоматические уведомления включены\nЕжедневно в 12:00')
     else:
-        schedule.every(10).seconds.do(lambda: job(message))
-    while True:
-        schedule.run_pending()
-        sleep(1)'''
+        user_id, *tmp, notify = result_check_id[0]
+        print(user_id, *tmp, notify, sep='|')
+        if result_check_id and notify == 'NO':
+            notify = 'YES'
+            sql_upd_user = f'UPDATE users SET notify = "{notify}" WHERE user_id = {user_id};'
+            post_sql_query(sql_upd_user)
+            bot.send_message(user_id, 'Автоматические уведомления включены\nЕжедневно в 12:00')
+        else:
+            notify = 'NO'
+            sql_upd_user = f'UPDATE users SET notify = "{notify}" WHERE user_id = {user_id};'
+            post_sql_query(sql_upd_user)
+            bot.send_message(user_id, 'Автоматические уведомления отключены')
 
-if __name__ == '__main__':
 
-    bot.polling(none_stop=True, interval=0)
+@bot.message_handler(commands=['help'])
+@bot.message_handler(func=lambda message: True, content_types=['text'])
+def main_menu(message):
+    show_button = types.InlineKeyboardButton(text="Show Currency", callback_data="Show")
+    keyboardmain = types.InlineKeyboardMarkup()
+    keyboardmain.add(show_button)
+    try:
+        bot.send_message(message.from_user.id, HELP, reply_markup=keyboardmain)
+    except telebot.apihelper.ApiException:
+        logging.exception(f'Send Notification ERROR - {telebot.apihelper.ApiException}')
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_inline(call):
+    if call.data == "Show":
+        currency_msg = get_currency()
+        for msg in currency_msg:
+            try:
+                bot.send_message(chat_id=call.message.chat.id, text=msg)
+            except telebot.apihelper.ApiException:
+                logging.exception(f'Send Notification ERROR - {telebot.apihelper.ApiException}')
+        sleep(1)
+        show_button = types.InlineKeyboardButton(text="Show Currency", callback_data="Show")
+        keyboardmain = types.InlineKeyboardMarkup()
+        keyboardmain.add(show_button)
+        try:
+            bot.send_message(chat_id=call.message.chat.id, text=WELCOME, reply_markup=keyboardmain)
+        except telebot.apihelper.ApiException:
+            logging.exception(f'Send Notification ERROR - {telebot.apihelper.ApiException}')
+
+
+if __name__ == "__main__":
+    Thread(target=sheduler, args=()).start()
+    Thread(target=main_body, args=()).start()
+    try:
+        bot.polling(none_stop=True)
+    except Exception as Error:
+        logging.exception(f'Polling error - {Error}')
