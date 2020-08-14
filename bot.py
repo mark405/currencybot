@@ -1,7 +1,6 @@
 import telebot
 import schedule
 import sqlite3
-from threading import Thread
 from time import sleep
 from telebot import types
 from telebot.util import async_dec
@@ -26,87 +25,70 @@ con.commit()
 
 
 @bot.message_handler(commands=['start', 'go'])
-@async_dec()
+# @async_dec()
 def ask(message):
     try:
         global markup_inline
-        markup_inline = types.InlineKeyboardMarkup()
-        tab_yes = types.InlineKeyboardButton(text='Да', callback_data='yes')
-        tab_no = types.InlineKeyboardButton(text='Нет', callback_data='no')
+        markup_inline = types.ReplyKeyboardMarkup(resize_keyboard=True)
+        tab_look = types.KeyboardButton(text='Посмотреть курс валют')
+        tab_remind = types.KeyboardButton(text='Вкл/выкл уведомления о курсе валют')
 
-        markup_inline.add(tab_yes, tab_no)
-        send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-        bot.send_message(message.chat.id, send_message, parse_mode='html')
-        bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
+        markup_inline.add(tab_look, tab_remind)
+        send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют\n"
+        msg = bot.send_message(message.chat.id, send_message, reply_markup=markup_inline, parse_mode='html')
+        # bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
         # bot.register_next_step_handler(msg, answer)
+        bot.register_next_step_handler(msg, answer)
     except Exception as e:
         print(e)
         msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
         bot.register_next_step_handler(msg, ask)
 
 
-@bot.callback_query_handler(func=lambda call: True)
-def answer(call):
-    try:
-        if call.data == 'yes':
-            global gr_markup
-            gr_markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-            grivna_button = types.KeyboardButton('Гривна')
-            rubl_button = types.KeyboardButton('Рубль')
-            gr_markup.add(grivna_button, rubl_button)
-            msg = bot.send_message(call.message.chat.id, f'В <b>гривнах</b> или <b>рублях</b>?', reply_markup=gr_markup,
-                                   parse_mode='html')
-            bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.message_id)
-            bot.register_next_step_handler(msg, grivna_rubl)
-        elif call.data == 'no':
-            bot.send_message(call.message.chat.id, f'<b>Прости, но это бот рассчитан только на курс валют😕</b>',
-                             parse_mode='html')
-            # bot.register_next_step_handler(msg, answer)
-        # elif call.message.text == '/start' or '/go':
-        # msg = bot.send_message(call.message.chat.id, f'<u>Ты вернулся в начало</u>', parse_mode='html')
-        # bot.register_next_step_handler(msg, ask)
+def answer(message):
+    if message.text == 'Посмотреть курс валют':
+        global gr_markup
+        gr_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        grivna_button = types.KeyboardButton('Гривна')
+        rubl_button = types.KeyboardButton('Рубль')
+        back_to_start = types.KeyboardButton('Назад')
+        gr_markup.add(grivna_button, rubl_button, back_to_start)
+        msg = bot.send_message(message.chat.id, f'В <b>гривнах</b> или <b>рублях</b>?', reply_markup=gr_markup,
+                               parse_mode='html')
+        # bot.edit_message_reply_markup(chat_id=message.chat.id, message_id=message.message_id)
+        bot.register_next_step_handler(msg, grivna_rubl)
+    elif message.text == 'Вкл/выкл уведомления о курсе валют':
+        global id
+        global status
+        id = message.from_user.id
+        cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
+        if cursor.fetchone() is None:
+            try:
+                cursor.execute(f"""INSERT INTO USER_TABLE VALUES(?)""", (id,))
+                con.commit()
+                msg = bot.send_message(id,
+                                       'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
+                schedule.every().day.at("09:00").do(job)
+                status = 1
+                bot.register_next_step_handler(msg, answer)
+            except Exception as e:
+                print(e)
+                bot.send_message(id, 'Не удалось подключить уведомления')
         else:
-            msg = bot.send_message(call.message.chat.id, 'Я не знаю, что ответить...')
-            bot.register_next_step_handler(msg, answer)
-    except Exception as e:
-        print(e)
-        bot.send_message(call.message.chat.id, 'Неполадки с кодом :/')
+            try:
+                cursor.execute(f"""DELETE FROM USER_TABLE WHERE user_id = {id}""")
+                con.commit()
+                msg = bot.send_message(id, 'Уведомления успешно отключены')
+                schedule.cancel_job(job)
+                status = 0
+                bot.register_next_step_handler(msg, answer)
+            except Exception as e:
+                print(e)
+                bot.send_message(id, 'Не удалось отключить уведомления')
 
-
-@bot.message_handler(commands=['notifications'])
-@async_dec()
-def add(message):
-    global id
-    global status
-    id = message.from_user.id
-    cursor.execute(f"""SELECT user_id FROM USER_TABLE WHERE user_id = {id}""")
-    if cursor.fetchone() is None:
-        try:
-            cursor.execute(f"""INSERT INTO USER_TABLE VALUES(?)""", (id,))
-            con.commit()
-            msg = bot.send_message(id,
-                                   'Уведомления о курсе доллара успешно подключены\nВремя: каждые 10 секунд')
-            schedule.every(10).seconds.do(job)
-            status = 1
-            # bot.register_next_step_handler(msg, job)
-        except Exception as e:
-            print(e)
-            bot.send_message(id, 'Не удалось подключить уведомления')
-    else:
-        try:
-            cursor.execute(f"""DELETE FROM USER_TABLE WHERE user_id = {id}""")
-            con.commit()
-            msg = bot.send_message(id, 'Уведомления успешно отключены')
-            schedule.cancel_job(job)
-            status = 0
-            # bot.register_next_step_handler(msg, grivna_rubl)
-        except Exception as e:
-            print(e)
-            bot.send_message(id, 'Не удалось отключить уведомления')
-
-    while status == 1:
-        schedule.run_pending()
-        sleep(1)
+        while status == 1:
+            schedule.run_pending()
+            sleep(1)
 
 
 def job():
@@ -117,11 +99,6 @@ def job():
     bot.send_message(id, f'<b>1</b> доллар США = <b>{str(convert_dollar[0].text)}</b> гривнам'
                                            f'\n<b>1</b> доллар США = <b>{str(convert_rus_dollar[0].text)}</b> рублям',
                      parse_mode='html')
-
-
-'''def remind(message):
-    msg = bot.send_message(message.chat.id, 'Вы отправили команду <u>/notifications</u>', parse_mode='html')
-    bot.register_next_step_handler(msg, add)'''
 
 
 @bot.message_handler(content_types=["text"])
@@ -168,10 +145,14 @@ def grivna_rubl(message):
             msg = bot.send_message(message.chat.id, f'<u>Выбери валюту:</u>', parse_mode='html',
                                    reply_markup=rus_markup_reply)
             bot.register_next_step_handler(msg, rus_kurs)
+        elif message.text == 'Назад':
+            msg = bot.send_message(message.chat.id, 'Вы вернулись в начало', reply_markup=markup_inline)
+            bot.register_next_step_handler(msg, answer)
         elif message.text == '/start':
             send_message = f"Здравствуй, <b>{message.from_user.first_name}</b>\nЯ могу показать тебе курс известных мировых валют"
-            bot.send_message(message.chat.id, send_message, parse_mode='html')
-            bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
+            msg = bot.send_message(message.chat.id, send_message, parse_mode='html')
+            bot.register_next_step_handler(msg, ask)
+            # bot.send_message(message.chat.id, 'Желаешь узнать курс?😏', reply_markup=markup_inline)
         else:
             msg = bot.send_message(message.chat.id, 'Я не знаю, что ответить...')
             bot.register_next_step_handler(msg, grivna_rubl)
@@ -616,4 +597,3 @@ def dollar_rus_litecoin(message):
 
 if __name__ == '__main__':
     bot.polling(none_stop=True, interval=0)
-
